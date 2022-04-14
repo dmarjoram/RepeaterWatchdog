@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "RepeaterWatchdog": {
+      "commandName": "Project",
+      "commandLineArgs": "--opened-at-login --minimize --connect-shortcut=1649759676236 -p calc -i 30"
+    }
+  }
+}
