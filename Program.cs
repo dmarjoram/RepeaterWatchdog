@@ -219,7 +219,7 @@ public partial class Program
                     try
                     {
                         // Start using a lower priority
-                        parent.PriorityClass = ProcessPriorityClass.Idle;
+                        parent.PriorityClass = ProcessPriorityClass.BelowNormal;
 
                         Process? auxProcess = Process.Start(auxProcStartInfo);
 
