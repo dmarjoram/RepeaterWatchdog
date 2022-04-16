@@ -211,15 +211,30 @@ public partial class Program
                 {
                     _logger?.LogInformation("Auxilary process {auxillaryProcess} found and running this period.", aux.ProcessFileInfo.Name);
 
-                    Process? auxProcess = Process.Start(new ProcessStartInfo(aux.ProcessFileInfo.FullName, aux?.Arguments ?? string.Empty));
+                    ProcessStartInfo auxProcStartInfo = new ProcessStartInfo(aux.ProcessFileInfo.FullName, aux?.Arguments ?? string.Empty);
 
-                    if (auxProcess != null)
+                    Process parent = Process.GetCurrentProcess();
+                    ProcessPriorityClass original = parent.PriorityClass;
+
+                    try
                     {
-                        _logger?.LogInformation("Auxilary started with ID {processId}", auxProcess.Id);
+                        // Start using a lower priority
+                        parent.PriorityClass = ProcessPriorityClass.Idle;
+
+                        Process? auxProcess = Process.Start(auxProcStartInfo);
+
+                        if (auxProcess != null)
+                        {
+                            _logger?.LogInformation("Auxilary started with ID {processId}", auxProcess.Id);
+                        }
+                        else
+                        {
+                            _logger?.LogError("Auxilary process at could not be started", aux?.ProcessFileInfo.Name ?? string.Empty);
+                        }
                     }
-                    else
+                    finally
                     {
-                        _logger?.LogError("Auxilary process at could not be started", aux?.ProcessFileInfo.Name ?? string.Empty);
+                        parent.PriorityClass = original;
                     }
                 }
                 catch (Exception ex)
