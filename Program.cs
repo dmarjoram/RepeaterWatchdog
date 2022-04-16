@@ -1,6 +1,7 @@
 ﻿
 using Microsoft.Extensions.Logging;
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Diagnostics;
 using System.Net.NetworkInformation;
 
@@ -10,6 +11,7 @@ public partial class Program
     const int DEFAULT_INTERVAL = 15;
     const int DEFAULT_FAILURES = 5;
     const int DEFAULT_TIMEOUTSECS = 3;
+    const int DEFAULT_AUXSKIPPERIODS = 3;
     const int RESTART_DELAYSECS = 5;
     static readonly List<string> DEFAULT_DESTINATIONS = new List<string>()
     {
@@ -30,6 +32,7 @@ public partial class Program
     internal static ILogger? _logger = null;
 
     internal static int _consecutiveFailures = 0;
+    internal static long _intervalsPassed = 0;
 
     internal static async Task<int> Main(string[] args)
     {
@@ -43,6 +46,11 @@ public partial class Program
                 {
                     options.SingleLine = true;
                     options.TimestampFormat = "MM/dd/yyyy hh:mm:ss ";
+                })
+                .AddFile("RepeaterWatcher.log", fileLoggerOptions =>
+                {
+                    fileLoggerOptions.MaxRollingFiles = 7;
+                    fileLoggerOptions.FileSizeLimitBytes = 10485760; // 10 MB
                 });
         });
         _logger = loggerFactory.CreateLogger(Environment.MachineName);
@@ -65,7 +73,7 @@ public partial class Program
 
         Option<int> intervalOption = new Option<int>(new[] { "-i", "--interval" }, 
             () => DEFAULT_INTERVAL, 
-            "The number of seconds between ping tests.");
+            "The number of seconds between tests.");
 
         Option<int> failuresOption = new Option<int>(new[] { "-f", "--failures" }, 
             () => DEFAULT_FAILURES, 
@@ -74,6 +82,15 @@ public partial class Program
         Option<int> timeoutOption = new Option<int>(new[] { "-t", "--timeout" }, 
             () => DEFAULT_TIMEOUTSECS, 
             "The ping timeout in seconds.");
+
+        Option<FileInfo> auxInfoOption = new Option<FileInfo>(new[] { "-a", "--aux" }, "The path to an auxillary process to run each period.");
+
+        Option<int> auxSkipPeriods = new Option<int>(new[] { "-s", "--skip" },
+            () => DEFAULT_AUXSKIPPERIODS,
+            "The number of intervals to skip before running the aux process.");
+
+        Option<string> auxArguments = new Option<string>(new[] { "-x", "--auxargs" },
+            "An argument string for the auxillary process.");
 
         Argument<IEnumerable<string>> argumentsOption = new Argument<IEnumerable<string>>("restartArguments", "The arguments which will be passed to the restarted process.")
         {
@@ -86,11 +103,14 @@ public partial class Program
         cmd.AddOption(intervalOption);
         cmd.AddOption(failuresOption);
         cmd.AddOption(timeoutOption);
+        cmd.AddOption(auxInfoOption);
+        cmd.AddOption(auxSkipPeriods);
+        cmd.AddOption(auxArguments);
 
-        cmd.SetHandler(async (IEnumerable<string> restartArguments, string process, IEnumerable<string> destinations, int interval, int failures, int timeout, CancellationToken token) =>
+        cmd.SetHandler(async (IEnumerable<string> restartArguments, string process, IEnumerable<string> destinations, int interval, int failures, int timeout, FileInfo auxInfo, int auxSkipPeriods, string auxArguments, CancellationToken token) =>
         {
-            returnCode = await HandleCommandLineAsync(restartArguments, process, destinations, interval, failures, timeout, token);
-        }, argumentsOption, processOption, destinationOption, intervalOption, failuresOption, timeoutOption);
+            returnCode = await HandleCommandLineAsync(restartArguments, process, destinations, interval, failures, timeout, auxInfo, auxSkipPeriods, auxArguments, token);
+        }, argumentsOption, processOption, destinationOption, intervalOption, failuresOption, timeoutOption, auxInfoOption, auxSkipPeriods, auxArguments);
 
         return await cmd.InvokeAsync(args);
     }
@@ -102,9 +122,19 @@ public partial class Program
         int interval,
         int failures,
         int timeout,
+        FileInfo auxInfo, 
+        int auxSkipPeriods,
+        string auxArguments,
         CancellationToken token)
     {
         List<string> testAddresses = destinations.ToList();
+
+        AuxInfo aux = new AuxInfo()
+        {
+            ProcessFileInfo = auxInfo,
+            SkipPeriods = auxSkipPeriods,
+            Arguments = auxArguments
+        };
 
         _consecutiveFailures = 0;
 
@@ -112,7 +142,7 @@ public partial class Program
         {
             try
             {
-                await TestLoopAsync(restartArguments, process, interval, timeout, failures, testAddresses, token);
+                await TestLoopAsync(restartArguments, process, interval, timeout, failures, testAddresses, aux, token);
             }
             catch (Exception ex)
             {
@@ -120,6 +150,8 @@ public partial class Program
 
                 await Task.Delay(TimeSpan.FromSeconds(30), token);
             }
+
+            _intervalsPassed++;
         }
 
         return 0;
@@ -128,7 +160,7 @@ public partial class Program
     /// <summary>
     /// Perform a test and then any remedial action
     /// </summary>
-    private static async Task TestLoopAsync(IEnumerable<string> restartArguments, string process, int interval, int timeout, int maxFailures, List<string> testAddresses, CancellationToken token)
+    private static async Task TestLoopAsync(IEnumerable<string> restartArguments, string process, int interval, int timeout, int maxFailures, List<string> testAddresses, AuxInfo aux, CancellationToken token)
     {
         (int SuccessCount, int FailCount) pingResults = await PerformPingChecksAsync(timeout, testAddresses, token);
 
@@ -163,6 +195,37 @@ public partial class Program
         }
 
         _logger?.LogInformation($"Sleeping for {interval} {(interval == 1 ? "second" : "seconds")}", interval);
+
+        // Deal with aux process
+        if (aux.ProcessFileInfo?.Exists == true)
+        {
+            if (_intervalsPassed % aux.SkipPeriods == 0)
+            {
+                try
+                {
+                    _logger?.LogInformation("Auxilary process {auxillaryProcess} found and running this period.", aux.ProcessFileInfo.Name);
+
+                    Process? auxProcess = Process.Start(new ProcessStartInfo(aux.ProcessFileInfo.FullName, aux?.Arguments ?? string.Empty));
+
+                    if (auxProcess != null)
+                    {
+                        _logger?.LogInformation("Auxilary started with ID {processId}.", auxProcess.Id);
+                    }
+                    else
+                    {
+                        _logger?.LogError("Auxilary process at could not be started.", aux?.ProcessFileInfo.Name ?? string.Empty);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError("Auxilary process at {processFileInfo} could not be started. Exception {exception}", aux.ProcessFileInfo.Name, ex);
+                }
+            }
+        }
+        else
+        {
+            _logger?.LogWarning("Auxilary process specified {auxillaryProcess} can not be found.", aux?.ProcessFileInfo?.FullName ?? "<unknown>");
+        }
 
         await Task.Delay(interval * 1000, token);
     }
@@ -281,5 +344,14 @@ public partial class Program
         }
 
         return (successCount, failCount);
+    }
+
+    internal class AuxInfo
+    {
+        public FileInfo? ProcessFileInfo { get; set; }
+
+        public string? Arguments { get; set; }
+
+        public int SkipPeriods { get; set; }
     }
 }
