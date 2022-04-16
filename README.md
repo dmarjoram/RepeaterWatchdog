@@ -18,9 +18,12 @@ Options:
   -p, --process <process>            The process to kill and restart. [default: OpenVPNConnect]
   -d, --destinations <destinations>  One or more destination IP or addresses to ping. [default:
                                      1.1.1.1|8.8.8.8|208.67.222.222]
-  -i, --interval <interval>          The number of seconds between ping tests. [default: 15]
+  -i, --interval <interval>          The number of seconds between tests. [default: 15]
   -f, --failures <failures>          The number consecutive failures before restarting. [default: 5]
   -t, --timeout <timeout>            The ping timeout in seconds. [default: 3]
+  -a, --aux <aux>                    The path to an auxillary process to run each period.
+  -s, --skip <skip>                  The number of intervals to skip before running the aux process. [default: 3]
+  -x, --auxargs <auxargs>            An argument string for the auxillary process.
   --version                          Show version information
   -?, -h, --help                     Show help and usage information
 ```
@@ -40,5 +43,5 @@ if %ERRORLEVEL% EQU 1 (
   echo VPN running. No need to start.
 )
 echo Starting network watchdog
-start C:\Radio\Watchdog\RepeaterWatchdog.exe --opened-at-login --minimize --connect-shortcut=1649759676236
+start C:\Radio\Watchdog\RepeaterWatchdog.exe --opened-at-login --minimize --connect-shortcut=1649759676236 -a "C:\Program Files\MacroCreator\MacroCreator.exe" -x "C:\Radio\Automation\CheckforWiresXWarningDialog.pmc -s1"
 ```

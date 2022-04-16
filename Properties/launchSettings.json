@@ -1,8 +1,7 @@
 {
   "profiles": {
     "RepeaterWatchdog": {
-      "commandName": "Project",
-      "commandLineArgs": "--opened-at-login --minimize --connect-shortcut=1649759676236 -p calc -i 30 -a \"C:\\Program Files\\MacroCreator\\MacroCreator.exe\" -x \"C:\\Radio\\Automation\\CheckforWiresXWarningDialog.pmc -s1\""
+      "commandName": "Project"
     }
   }
 }

@@ -144,6 +144,12 @@ public partial class Program
             {
                 await TestLoopAsync(restartArguments, process, interval, timeout, failures, testAddresses, aux, token);
             }
+            catch (TaskCanceledException)
+            {
+                _logger?.LogError("Test loop has been cancelled.");
+
+                return 1;
+            }
             catch (Exception ex)
             {
                 _logger?.LogError("An exception {exception} occured. Sleeping for 30 seconds.", ex);
@@ -209,11 +215,11 @@ public partial class Program
 
                     if (auxProcess != null)
                     {
-                        _logger?.LogInformation("Auxilary started with ID {processId}.", auxProcess.Id);
+                        _logger?.LogInformation("Auxilary started with ID {processId}", auxProcess.Id);
                     }
                     else
                     {
-                        _logger?.LogError("Auxilary process at could not be started.", aux?.ProcessFileInfo.Name ?? string.Empty);
+                        _logger?.LogError("Auxilary process at could not be started", aux?.ProcessFileInfo.Name ?? string.Empty);
                     }
                 }
                 catch (Exception ex)
@@ -224,12 +230,11 @@ public partial class Program
         }
         else
         {
-            _logger?.LogWarning("Auxilary process specified {auxillaryProcess} can not be found.", aux?.ProcessFileInfo?.FullName ?? "<unknown>");
+            _logger?.LogWarning("Auxilary process specified {auxillaryProcess} can not be found", aux?.ProcessFileInfo?.FullName ?? "<unknown>");
         }
 
         await Task.Delay(interval * 1000, token);
     }
-
 
     /// <summary>
     /// Restart a process
