@@ -12,7 +12,7 @@ public partial class Program
     const int DEFAULT_FAILURES = 5;
     const int DEFAULT_TIMEOUTSECS = 3;
     const int DEFAULT_AUXSKIPPERIODS = 3;
-    const int RESTART_DELAYSECS = 5;
+    const int RESTART_DELAYSECS = 10;
     static readonly List<string> DEFAULT_DESTINATIONS = new List<string>()
     {
         "1.1.1.1",
@@ -33,6 +33,7 @@ public partial class Program
 
     internal static int _consecutiveFailures = 0;
     internal static long _intervalsPassed = 0;
+    internal static int _intervalsSinceLastAuxRun = 0;
 
     internal static async Task<int> Main(string[] args)
     {
@@ -207,6 +208,8 @@ public partial class Program
         {
             if (_intervalsPassed % aux.SkipPeriods == 0)
             {
+                _intervalsSinceLastAuxRun = 0;
+
                 try
                 {
                     _logger?.LogInformation("Auxilary process {auxillaryProcess} found and running this period.", aux.ProcessFileInfo.Name);
@@ -242,6 +245,12 @@ public partial class Program
                     _logger?.LogError("Auxilary process at {processFileInfo} could not be started. Exception {exception}", aux.ProcessFileInfo.Name, ex);
                 }
             }
+            else
+            {
+                _intervalsSinceLastAuxRun++;
+
+                _logger?.LogInformation($"Running auxilary process in {aux.SkipPeriods - _intervalsSinceLastAuxRun} {(interval == 1 ? "interval" : "intervals")}.");
+            }
         }
         else
         {
@@ -258,6 +267,20 @@ public partial class Program
     /// <param name="restartArguments">args to pass to process</param>
     private static async Task<bool> RestartProcessAsync(string process, IEnumerable<string> restartArguments)
     {
+        bool forceStart = false;
+        string? imagePath = null;
+
+        // Check if this is a fully qualified path and if it is, we will ensure the process is running
+        if (!string.IsNullOrWhiteSpace(Path.GetDirectoryName(process)))
+        {
+            // We need to extract the image name from the full path as a directory name
+            // was resolved from the process variable, rather than just an image name.
+            imagePath = process;
+            process = Path.GetFileNameWithoutExtension(process);
+
+            forceStart = true;
+        }
+        
         Process[] managedProcesses = Process.GetProcessesByName(process);
 
         if (managedProcesses.Length > 0)
@@ -265,7 +288,7 @@ public partial class Program
             _logger?.LogWarning($"There is {managedProcesses.Length} matching {(managedProcesses.Length == 1 ? "process" : "processes")} found", managedProcesses.Length);
 
             // Find most likely image path
-            string? imagePath = managedProcesses.Select(p => p.MainModule?.FileName)
+            imagePath = managedProcesses.Select(p => p.MainModule?.FileName)
                 .GroupBy(p => p)
                 .OrderByDescending(group => group.Count())
                 .FirstOrDefault()?.Key;
@@ -287,36 +310,53 @@ public partial class Program
 
             await Task.Delay(TimeSpan.FromSeconds(RESTART_DELAYSECS));
 
-            string commandLineArgs = string.Join(" ", restartArguments.Select(arg => arg));
-
-            try
-            {
-                Process? startedProcess = Process.Start(new ProcessStartInfo(imagePath, commandLineArgs));
-
-                if (startedProcess != null)
-                {
-                    _logger?.LogInformation("Started process {imagePath} successfully. Process ID is {processId}", imagePath, startedProcess?.Id);
-
-                    return true;
-                }
-            }
-            catch (Exception exception)
-            {
-                _logger?.LogError("Process could not be started using executable at {imagePath}. An exception occured {exception}", imagePath, exception);
-
-                return false;
-            }
-
-            _logger?.LogError("Process could not be started using executable at {imagePath}", imagePath);
-
-            return false;
+            return RunProcess(imagePath, restartArguments);
         }
         else
         {
+            if (forceStart && !string.IsNullOrWhiteSpace(imagePath))
+            {
+                _logger?.LogWarning("No processes matching name {name} found. We will try and start it now by executing {imagePath}", process, imagePath);
+
+                return RunProcess(imagePath, restartArguments);
+            }
+
             _logger?.LogWarning("No processes matching name {name} found. No processes will be closed or killed", process);
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Run a process
+    /// </summary>
+    /// <param name="process"></param>
+    /// <returns></returns>
+    private static bool RunProcess(string imagePath, IEnumerable<string> restartArguments)
+    {
+        string commandLineArgs = string.Join(" ", restartArguments.Select(arg => arg));
+
+        try
+        {
+            Process? startedProcess = Process.Start(new ProcessStartInfo(imagePath, commandLineArgs));
+
+            if (startedProcess != null)
+            {
+                _logger?.LogInformation("Started process {imagePath} successfully. Process ID is {processId}", imagePath, startedProcess?.Id);
+
+                return true;
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogError("Process could not be started using executable at {imagePath}. An exception occured {exception}", imagePath, exception);
+
+            return false;
+        }
+
+        _logger?.LogError("Process could not be started using executable at {imagePath}", imagePath);
+
+        return false;
     }
 
 
