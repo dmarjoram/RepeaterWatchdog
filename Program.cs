@@ -15,9 +15,9 @@ public partial class Program
     const int RESTART_DELAYSECS = 10;
     static readonly List<string> DEFAULT_DESTINATIONS = new List<string>()
     {
-        "1.1.1.1",
-        "8.8.8.8",
-        "208.67.222.222",
+        "1.0.0.1",
+        "8.8.4.4",
+        "www.bbc.co.uk",
     };
 
     static readonly string HEADER_ART = @" _____                       _         __          __   _       _               " + Environment.NewLine +
